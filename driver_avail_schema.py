@@ -1,7 +1,6 @@
 from fastavro import writer, reader, parse_schema
 import io
 
-
 # Define the driver schema
 driver_schema = {
     'doc': 'A driver availability feed schema.',
@@ -28,7 +27,7 @@ driver_schema = {
             'type': {
                 'type': 'enum',
                 'name': 'Status',
-                'symbols': ['available', 'en route', 'engaged', 'offline']
+                'symbols': ['available', 'en_route', 'engaged', 'offline']  # Fixed
             },
             'doc': 'Current driver status.'
         },

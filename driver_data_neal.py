@@ -4,6 +4,7 @@ import time
 import random
 from datetime import datetime, timedelta
 import numpy as np
+from driver_avail_schema import parsed_driver_schema
 
 fake = Faker()
 
@@ -154,14 +155,12 @@ sorted_events = sorted(sample_events, key=lambda x: x['timestamp'])
 from fastavro import writer, parse_schema
 import os
 
-# Assuming driver_schema is already defined and parsed
-parsed_driver_schema = parse_schema(driver_schema)
 
 
 def write_to_avro_file(records, file_path):
     """Write records to an Avro file."""
     with open(file_path, 'wb') as out:
-        writer(out, parsed_driver_schema, records)
+        writer(out, parsed_driver_schema, records) # loaded from the driver_avail_schema script
 
 # Generate 1000 records
 sample_events = generate_1000_records()

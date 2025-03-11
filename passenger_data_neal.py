@@ -4,6 +4,7 @@ import random
 from datetime import datetime, timedelta
 import numpy as np
 from fastavro import writer  
+from passenger_schema import parsed_passenger_schema
 
 fake = Faker()
 
@@ -155,15 +156,13 @@ def generate_records(num_records):
 
 # Generate and save records
 
-
-
 def save_records_to_avro(num_records, output_file='passenger_events.avro'):
     """Generate records and save them to an Avro file"""
     records = generate_records(num_records)
     
     from fastavro import writer
     with open(output_file, 'wb') as out:
-        writer(out, parsed_passenger_schema, records)
+        writer(out, parsed_passenger_schema, records) 
     
     return records
 
