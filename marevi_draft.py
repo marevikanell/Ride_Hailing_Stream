@@ -1,16 +1,10 @@
-#-----------------------------
-
-# NOT WORKING, JUST TOOK NEALS CODE AND ADDED SOME MORE CONSTRAINTS AND INTERDEPENDENCE BETWEEN THE 2 SCHEMAS!
-
-#-----------------------------
 import json
-import random
 import uuid
 from datetime import datetime
 from faker import Faker
 from fastavro import writer
 import math
-
+import random
 from driver_avail_schema import parsed_driver_schema
 from passenger_schema import parsed_passenger_schema
 
@@ -32,15 +26,24 @@ VEHICLE_DISTRIBUTION = {
 }
 
 # Traffic condition weights
-TRAFFIC_WEIGHTS_RUSH = [0.4, 0.3, 0.2, 0.1]  # heavy, gridlock, moderate, light
-TRAFFIC_WEIGHTS_NORMAL = [0.4, 0.3, 0.15, 0.05, 0.1]  # light, moderate, heavy, gridlock, unknown
+TRAFFIC_WEIGHTS_RUSH = [0.4, 0.3, 0.2, 0.1]  # Matches "heavy", "gridlock", "moderate", "light"
+TRAFFIC_WEIGHTS_NORMAL = [0.4, 0.3, 0.15, 0.05, 0.1]
 
-# Helper functions
+# Global counters for IDs
+passenger_id_counter = 0
+driver_id_counter = 0
+ride_id_counter = 0
+event_id_counter = 0
+
+def generate_id(prefix, counter):
+    """Generate a formatted ID with a prefix and a counter."""
+    return f"{prefix}{counter:06d}"
+
 def random_location_near_city():
     """Generate a random location within CITY_RADIUS of CITY_CENTER."""
     lat, lon = CITY_CENTER
-    delta_lat = random.uniform(-CITY_RADIUS, CITY_RADIUS)
-    delta_lon = random.uniform(-CITY_RADIUS, CITY_RADIUS)
+    delta_lat = fake.pyfloat(min_value=-CITY_RADIUS, max_value=CITY_RADIUS)
+    delta_lon = fake.pyfloat(min_value=-CITY_RADIUS, max_value=CITY_RADIUS)
     return {"latitude": lat + delta_lat, "longitude": lon + delta_lon}
 
 def haversine_distance(loc1, loc2):
@@ -60,70 +63,93 @@ def get_traffic_condition(timestamp):
     is_rush_hour = RUSH_HOURS_MORNING[0] <= hour <= RUSH_HOURS_MORNING[1] or \
                    RUSH_HOURS_EVENING[0] <= hour <= RUSH_HOURS_EVENING[1]
     weights = TRAFFIC_WEIGHTS_RUSH if is_rush_hour else TRAFFIC_WEIGHTS_NORMAL
-    return random.choices(['heavy', 'gridlock', 'moderate', 'light', 'unknown'], weights=weights)[0]
+    traffic_conditions = ["heavy", "gridlock", "moderate", "light", "unknown"]
+
+    # Adjust traffic conditions for rush hour
+    if is_rush_hour:
+        traffic_conditions = traffic_conditions[:len(weights)]
+
+    if len(weights) != len(traffic_conditions):
+        raise ValueError("Weights and traffic conditions lengths do not match.")
+
+    return random.choices(traffic_conditions, weights=weights, k=1)[0]
 
 def get_driver_status(hour):
     """Determine likely driver status based on time."""
     if RUSH_HOURS_MORNING[0] <= hour <= RUSH_HOURS_MORNING[1] or \
        RUSH_HOURS_EVENING[0] <= hour <= RUSH_HOURS_EVENING[1]:
-        return random.choices(['available', 'en_route', 'engaged', 'offline'], weights=[0.15, 0.35, 0.45, 0.05])[0]
+        statuses = ['available', 'en_route', 'engaged', 'offline']
+        weights = [0.15, 0.35, 0.45, 0.05]
     elif 0 <= hour <= 5:
-        return random.choices(['available', 'en_route', 'engaged', 'offline'], weights=[0.1, 0.1, 0.2, 0.6])[0]
+        statuses = ['available', 'en_route', 'engaged', 'offline']
+        weights = [0.1, 0.1, 0.2, 0.6]
     else:
-        return random.choices(['available', 'en_route', 'engaged', 'offline'], weights=[0.3, 0.3, 0.3, 0.1])[0]
+        statuses = ['available', 'en_route', 'engaged', 'offline']
+        weights = [0.3, 0.3, 0.3, 0.1]
 
+    if len(weights) != len(statuses):
+        raise ValueError("Weights and statuses lengths do not match.")
+
+    return random.choices(statuses, weights=weights, k=1)[0]
 
 def estimate_duration(distance_km, traffic_condition):
     """Estimate ride duration based on distance and traffic condition."""
     base_speed_kmph = {
-        'light': 50,
-        'moderate': 30,
-        'heavy': 20,
-        'gridlock': 10,
-        'unknown': 25
+        "light": 50,
+        "moderate": 30,
+        "heavy": 20,
+        "gridlock": 10,
+        "unknown": 25
     }
     speed = base_speed_kmph.get(traffic_condition, 25)  # Default to 25 km/h
     return int((distance_km / speed) * 3600)  # Return duration in seconds
 
-
 def estimate_fare(distance_km, ride_type, traffic_condition):
     """Estimate fare based on distance, ride type, and traffic conditions."""
-    base_rate = {'standard': 1.0, 'premium': 1.5, 'pool': 0.8}
-    traffic_multiplier = {'light': 1.0, 'moderate': 1.2, 'heavy': 1.5, 'gridlock': 1.8, 'unknown': 1.1}
+    base_rate = {"standard": 1.0, "premium": 1.5, "pool": 0.8}
+    traffic_multiplier = {"light": 1.0, "moderate": 1.2, "heavy": 1.5, "gridlock": 1.8, "unknown": 1.1}
     rate = base_rate[ride_type] * traffic_multiplier.get(traffic_condition, 1.0)
     return round(rate * distance_km * 10, 2)  # Base fare calculation
 
-
 def generate_driver_event(driver_id, ride_id=None, timestamp=None):
     """Generate a driver event with realistic constraints."""
+    global event_id_counter
+    event_id = generate_id("E", event_id_counter)
+    event_id_counter += 1
     timestamp = timestamp or fake.unix_time()
     return {
-        "event_id": str(uuid.uuid4()),
+        "event_id": event_id,
         "driver_id": driver_id,
         "timestamp": timestamp,
         "location": random_location_near_city(),
         "status": get_driver_status(datetime.fromtimestamp(timestamp).hour),
         "ride_id": ride_id,
-        "vehicle_type": random.choices(list(VEHICLE_DISTRIBUTION.keys()), weights=VEHICLE_DISTRIBUTION.values())[0],
-        "driver_session_id": str(uuid.uuid4()),
+        "vehicle_type": random.choices(list(VEHICLE_DISTRIBUTION.keys()),
+                                       weights=list(VEHICLE_DISTRIBUTION.values()), k=1)[0],
+        "driver_session_id": generate_id("S", driver_id_counter),
         "traffic_condition": get_traffic_condition(timestamp)
     }
 
-
 def generate_passenger_request(driver_id=None, status="requested", ride_id=None, timestamp=None):
     """Generate a passenger request with realistic constraints."""
+    global passenger_id_counter, ride_id_counter
+    passenger_id = generate_id("P", passenger_id_counter)
+    passenger_id_counter += 1
+
+    ride_id = ride_id or generate_id("R", ride_id_counter)
+    ride_id_counter += 1
     timestamp = timestamp or fake.unix_time()
     pickup = random_location_near_city()
     dropoff = random_location_near_city()
     distance_km = haversine_distance(pickup, dropoff)
     traffic_condition = get_traffic_condition(timestamp)
     duration_estimate = estimate_duration(distance_km, traffic_condition)
-    ride_type = random.choice(['standard', 'premium', 'pool'])
+    ride_type = random.choice(["standard", "premium", "pool"])
     fare_estimate = estimate_fare(distance_km, ride_type, traffic_condition)
 
     return {
-        "request_id": str(uuid.uuid4()),
-        "passenger_id": str(uuid.uuid4()),
+        "request_id": generate_id("REQ", passenger_id_counter),
+        "passenger_id": passenger_id,
         "timestamp": timestamp,
         "pickup_location": pickup,
         "dropoff_location": dropoff,
@@ -134,33 +160,21 @@ def generate_passenger_request(driver_id=None, status="requested", ride_id=None,
         "duration_estimate": duration_estimate,
         "fare_estimate": fare_estimate,
         "feedback": None if status != "completed" else {
-            "rating": random.randint(1, 5),
+            "rating": fake.random_int(min=1, max=5),
             "comments": fake.sentence()
         }
     }
 
-# NOT NECESSARY FOR THIS DELIVERALE I GUESS?
-def generate_matched_data(num_records):
-    """Generate matched driver and passenger data."""
-    driver_data, passenger_data = [], []
+def save_data(num_drivers, num_requests, json_file_driver, avro_file_driver, json_file_passenger, avro_file_passenger):
+    driver_data = []
+    passenger_data = []
 
-    for _ in range(num_records):
-        ride_id = str(uuid.uuid4())
-        timestamp = fake.unix_time()
+    for _ in range(num_drivers):
+        driver_id = generate_id("D", driver_id_counter)
+        driver_data.append(generate_driver_event(driver_id))
 
-        driver_id = str(uuid.uuid4())
-        driver_event = generate_driver_event(driver_id=driver_id, ride_id=ride_id, timestamp=timestamp)
-        driver_data.append(driver_event)
-
-        passenger_request = generate_passenger_request(driver_id=driver_id, status="accepted", ride_id=ride_id, timestamp=timestamp)
-        passenger_data.append(passenger_request)
-
-    return driver_data, passenger_data
-
-
-# Generate and save data
-def save_data(num_records, json_file_driver, avro_file_driver, json_file_passenger, avro_file_passenger):
-    driver_data, passenger_data = generate_matched_data(num_records)
+    for _ in range(num_requests):
+        passenger_data.append(generate_passenger_request())
 
     # Save driver data
     with open(json_file_driver, 'w') as f:
@@ -174,9 +188,7 @@ def save_data(num_records, json_file_driver, avro_file_driver, json_file_passeng
     with open(avro_file_passenger, 'wb') as f:
         writer(f, parsed_passenger_schema, passenger_data)
 
+# Generate 5,000 drivers and 10,000 passenger requests
+save_data(5000, 10000, 'drivers.json', 'drivers.avro', 'passenger_requests.json', 'passenger_requests.avro')
 
-# Generate 100 matched records
-save_data(100, 'drivers.json', 'drivers.avro', 'passenger_requests.json', 'passenger_requests.avro')
-
-print("Data generation complete with advanced constraints!")
-
+print("Data generation complete!")
